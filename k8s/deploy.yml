@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: java-api
+  name: java-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-api
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: java-api
+    spec:
+      containers:
+      - image: docker.io/artemioac/rest-service:0.0.1-snapshot
+        name: java-api
+        imagePullPolicy: Always
+        resources: {}
+        ports:
+          - containerPort: 8750 
+status: {}

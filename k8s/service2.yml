@@ -1,0 +1,11 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: java-api
+spec:
+  selector:
+    app: java-api
+  ports:
+  - name: http
+    port: 8750
+  type: LoadBalancer

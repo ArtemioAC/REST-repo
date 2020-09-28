@@ -1,8 +1,25 @@
+buildscript {
+	ext {
+		dockerRegistryUsername = 'artemioac'
+		dockerRegistryHost = 'docker.io'
+	}
+	repositories {
+		mavenCentral()
+		jcenter()
+	}
+
+	dependencies {
+		classpath "com.bmuschko:gradle-docker-plugin:6.6.0"
+		classpath "at.phatbl:shellexec:1.5.2"
+
+	}
+}
 plugins {
 	id 'org.springframework.boot' version '2.3.3.RELEASE'
 	id 'io.spring.dependency-management' version '1.0.10.RELEASE'
 	id 'java'
 }
+apply plugin: com.bmuschko.gradle.docker.DockerRemoteApiPlugin
 
 group = 'com.example'
 version = '0.0.1-SNAPSHOT'
@@ -19,6 +36,73 @@ dependencies {
 	}
 }
 
+
 test {
 	useJUnitPlatform()
+}
+
+task createDockerfile(type: com.bmuschko.gradle.docker.tasks.image.Dockerfile) {
+	dependsOn assemble
+	destFile = project.file('build/libs/Dockerfile')
+	from 'mcr.microsoft.com/java/jdk:11-zulu-centos'
+	copyFile "${rootProject.name}-${project.version}.jar", "/opt/${rootProject.name}.jar"
+	label(['maintainer': 'Prueba Artemio'])
+	//instruction 'RUN apk update'
+	//instruction 'RUN apk add libc6-compat'
+	//instruction 'RUN apk add --no-cache libstdc++'
+	exposePort 8750
+	entryPoint 'java', "-Djava.awt.headless=true", "-Xms512m", "-Xmx512m", '-jar', "/opt/${rootProject.name}.jar"
+}
+
+task buildImage(type: com.bmuschko.gradle.docker.tasks.image.DockerBuildImage) {
+
+	dependsOn createDockerfile
+	def repositoryName = project.name.replace(' ', '').toLowerCase()
+	println "Name: '${repositoryName}'"
+	inputDir.set(project.file('./build/libs'))
+	def registryOwner = (System.getenv('DOCKER_BUILDER_USERNAME_DAAS') ?: (project.hasProperty('dockerRegistryUsername') ? dockerRegistryUsername : '')) ?: ''
+
+	if(!registryOwner) {
+		throw new RuntimeException('Se debe espeficar la siguiente variable de ambiente: DOCKER_BUILDER_USERNAME_DAAS')
+	}
+
+	println "Owner: '${registryOwner}'"
+
+	def registryHost = (System.getenv('DOCKER_BUILDER_REGISTRY_HOST') ?: (project.hasProperty('dockerRegistryHost') ? dockerRegistryHost : '')) ?: ''
+
+	if(registryHost) {
+		registryHost = registryHost + "/"
+	}
+
+	def tagVersion = project.version
+	def buildNumber = System.getenv('BUILD_NUMBER')
+	if(buildNumber) {
+		tagVersion += "_build_ci_${buildNumber}"
+	}
+
+	def finalTag = "${registryHost}${registryOwner}/${repositoryName}:${tagVersion}".toLowerCase()
+	println "Created Image with tag: ${finalTag}"
+	images.add(finalTag)
+}
+
+task pushImage(type: at.phatbl.shellexec.ShellExec) {
+	def tag = buildImage.images.get()[0]
+	command "docker push ${tag}"
+}
+
+
+task setTagImage(type: at.phatbl.shellexec.ShellExec) {
+	def tag = buildImage.images.get()[0]
+	command "export TAG=${tag}; envsubst < ./k8s/deploy.tpl > ./k8s/deploy.yaml"
+}
+
+
+task deploy(type: at.phatbl.shellexec.ShellExec) {
+	def tag = buildImage.images.get()[0]
+	command "export TAG=${tag}; envsubst < ./k8s/deploy.tpl > ./k8s/deployment.yaml; kubectl apply -f k8s/ -n java-api"
+}
+
+task cleanTmpImage(type: at.phatbl.shellexec.ShellExec) {
+	def tag = buildImage.images.get()[0]
+	command "docker rmi ${tag}"
 }
